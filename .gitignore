@@ -1,0 +1,55 @@
+# ==========================================
+# 1. HERRAMIENTAS Y EXECUTABLES EXTERNOS
+# ==========================================
+# Ignora ejecutables pesados como FFmpeg descargados localmente
+**/FFmpeg/
+**/ffmpeg/
+*.exe
+*.dll
+!**/bin/release/*.exe # Opcional: Descomenta si deseas permitir publicar builds finales explícitos
+
+# ==========================================
+# 2. ARCHIVOS DE COMPILACIÓN E INTERMEDIOS (BUILD OUTPUTS)
+# ==========================================
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+[Tt]emp/
+
+# ==========================================
+# 3. ARCHIVOS DE ARCHIVO Y COMPRIMIDOS
+# ==========================================
+*.zip
+*.7z
+*.rar
+*.tar.gz
+
+# ==========================================
+# 4. CONFIGURACIÓN Y BASURA DE VISUAL STUDIO
+# ==========================================
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+*.cache
+*.dtbcache
+*.pfx
+
+# ==========================================
+# 5. ARCHIVOS TEMPORALES Y CAPTURAS PRUEBA
+# ==========================================
+# Ignora imágenes o capturas tomadas durante pruebas locales
+*.jpg
+*.jpeg
+*.png
+*.bmp
+!**/Resources/*.png   # Permite recursos estáticos del proyecto (iconos, imágenes fijas)
+!**/Resources/*.jpg
+
+# ==========================================
+# 6. PAQUETES Y DEPENDENCIAS LOCALES (NUGET)
+# ==========================================
+**/packages/*
+!**/packages/repositories.config
