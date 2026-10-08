@@ -10,11 +10,18 @@ using System.Windows.Forms;
 
 namespace Proyecto_Camara
 {
-    public partial class Form1 : Form
+    public partial class FormInicio : Form
     {
-        public Form1()
+        public FormInicio()
         {
             InitializeComponent();
+        }
+
+        private void btnGrabacion_Click(object sender, EventArgs e)
+        {
+            FormGrabar grabar = new FormGrabar();
+            grabar.Show();
+            this.Hide();
         }
     }
 }
