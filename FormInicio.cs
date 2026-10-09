@@ -49,9 +49,9 @@ namespace Proyecto_Camara
                 cmbCalidad.Items.Add("Alta - Original (tamaño de tu pantalla)");
                 cmbCalidad.Items.Add("Media - 1280 x 720");
                 cmbCalidad.Items.Add("Baja - 854 x 480");
-                cmbCalidad.SelectedIndex = 1;   // Media por defecto
+                cmbCalidad.SelectedIndex = 0;   // Alta por defecto
 
-                lblEstado.Text = "Listo";
+                lblEstado.Text = "Listo (" + _controladores.Descripcion + ")";
                 btnGrabacion.Enabled = true;
             }
             catch (Exception ex)
