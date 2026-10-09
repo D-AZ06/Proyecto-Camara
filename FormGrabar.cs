@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 
 namespace Proyecto_Camara
 {
@@ -22,20 +23,33 @@ namespace Proyecto_Camara
         private const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;    // Invisible en capturas (Windows 10/11)
 
         // Instancia del backend
-        private Camara _camara = new Camara();
+        private readonly Camara _camara;
 
-        public FormGrabar()
+        // Referencia al formulario de inicio para poder volver a él
+        private readonly FormInicio _inicio;
+
+        public FormGrabar(Controladores controladores, FormInicio inicio)
         {
             InitializeComponent();
+            _inicio = inicio;
+            _camara = new Camara(controladores);
         }
+
+        private readonly Stopwatch _cronometro = new Stopwatch();
 
         private void FormGrabar_Load(object sender, EventArgs e)
         {
+            timerTiempo.Interval = 500;
+            timerTiempo.Tick -= timerTiempo_Tick;   // evita duplicarlo si el diseñador ya lo conectó
+            timerTiempo.Tick += timerTiempo_Tick;
             btnPausarReanudar.Enabled = false;
             btnPausarReanudar.Text = "Pausar";
 
             // Decirle a Windows que esta ventana no aparezca en grabaciones ni capturas de pantalla
             SetWindowDisplayAffinity(this.Handle, WDA_EXCLUDEFROMCAPTURE);
+
+            lblTiempo.Text = "00:00:00";
+            ActualizarEstadoUI(EstadoVisual.Detenido);
         }
 
         /// <summary>
@@ -57,6 +71,49 @@ namespace Proyecto_Camara
             }
 
             return rutaVideos;
+        }
+
+        private enum EstadoVisual
+        {
+            Detenido,
+            Grabando,
+            Pausado,
+            Finalizado
+        }
+
+        private void ActualizarEstadoUI(EstadoVisual estado)
+        {
+            switch (estado)
+            {
+                case EstadoVisual.Detenido:
+                    pnlEstado.BackColor = Color.Gray;
+                    lblEstadoTexto.Text = "Listo / Detenido";
+                    lblEstadoTexto.ForeColor = Color.White;
+                    break;
+
+                case EstadoVisual.Grabando:
+                    pnlEstado.BackColor = Color.Crimson; // Rojo activo
+                    lblEstadoTexto.Text = "● GRABANDO";
+                    lblEstadoTexto.ForeColor = Color.White;
+                    break;
+
+                case EstadoVisual.Pausado:
+                    pnlEstado.BackColor = Color.DarkOrange; // Naranja pausa
+                    lblEstadoTexto.Text = "⏸ EN PAUSA";
+                    lblEstadoTexto.ForeColor = Color.White;
+                    break;
+
+                case EstadoVisual.Finalizado:
+                    pnlEstado.BackColor = Color.ForestGreen; // Verde completado
+                    lblEstadoTexto.Text = "✔ GRABACIÓN GUARDADA";
+                    lblEstadoTexto.ForeColor = Color.White;
+                    break;
+            }
+        }
+
+        private void timerTiempo_Tick(object sender, EventArgs e)
+        {
+            lblTiempo.Text = _cronometro.Elapsed.ToString(@"hh\:mm\:ss");
         }
 
         // ==========================================
@@ -94,6 +151,7 @@ namespace Proyecto_Camara
             {
                 if (!_camara.EnGrabacion)
                 {
+                    // --- INICIANDO GRABACIÓN ---
                     string nombreVideo = $"pantalla_{DateTime.Now:yyyyMMdd_HHmmss}.mp4";
                     string rutaCompleta = Path.Combine(ObtenerRutaCarpetaVideos(), nombreVideo);
 
@@ -105,9 +163,16 @@ namespace Proyecto_Camara
                     btnPausarReanudar.Enabled = true;
                     btnPausarReanudar.Text = "Pausar";
                     btnPausarReanudar.BackColor = Color.Orange;
+
+                    // Integración de Cronómetro y Panel (Rojo)
+                    _cronometro.Restart();
+                    lblTiempo.Text = "00:00:00";
+                    timerTiempo.Start();
+                    ActualizarEstadoUI(EstadoVisual.Grabando);
                 }
                 else
                 {
+                    // --- DETENIENDO GRABACIÓN ---
                     await Task.Run(() => _camara.DetenerGrabacion());
 
                     btnGrabarDetener.Text = "Iniciar Grabación";
@@ -115,6 +180,11 @@ namespace Proyecto_Camara
 
                     btnPausarReanudar.Enabled = false;
                     btnPausarReanudar.Text = "Pausar";
+
+                    // Integración de Cronómetro y Panel (Verde)
+                    _cronometro.Stop();
+                    timerTiempo.Stop();
+                    ActualizarEstadoUI(EstadoVisual.Finalizado);
 
                     MessageBox.Show("Grabación guardada en la carpeta ProyectoCamara.", "Éxito");
                 }
@@ -140,17 +210,29 @@ namespace Proyecto_Camara
             {
                 if (!_camara.EnPausa)
                 {
+                    // --- PAUSANDO ---
                     await Task.Run(() => _camara.PausarGrabacion());
 
                     btnPausarReanudar.Text = "Reanudar";
                     btnPausarReanudar.BackColor = Color.Yellow;
+
+                    // Integración: Detener reloj y cambiar a Naranja
+                    _cronometro.Stop();
+                    timerTiempo.Stop();
+                    ActualizarEstadoUI(EstadoVisual.Pausado);
                 }
                 else
                 {
+                    // --- REANUDANDO ---
                     await Task.Run(() => _camara.ReanudarGrabacion());
 
                     btnPausarReanudar.Text = "Pausar";
                     btnPausarReanudar.BackColor = Color.Orange;
+
+                    // Integración: Reanudar reloj y volver a Rojo
+                    _cronometro.Start();
+                    timerTiempo.Start();
+                    ActualizarEstadoUI(EstadoVisual.Grabando);
                 }
             }
             catch (Exception ex)
@@ -165,11 +247,10 @@ namespace Proyecto_Camara
 
         private void btnRegresar_Click(object sender, EventArgs e)
         {
-            FormInicio inicio = new FormInicio();
-            inicio.Show();
+            _inicio.Show();
             this.Close();
         }
 
-        
+
     }
 }

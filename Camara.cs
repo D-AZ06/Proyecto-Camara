@@ -1,10 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 
 namespace Proyecto_Camara
 {
@@ -12,24 +10,20 @@ namespace Proyecto_Camara
     {
         private readonly string _rutaFFmpeg;
         private Process _procesoGrabacion;
-
-        // Lista de fragmentos temporales creados al pausar/reanudar
+        private readonly Controladores _controladores;
         private readonly List<string> _fragmentosTemporales = new List<string>();
-
         private string _rutaVideoFinal;
+        private readonly StringBuilder _erroresFFmpeg = new StringBuilder();
 
-        // Estados de la grabación
         public bool EnGrabacion { get; private set; }
         public bool EnPausa { get; private set; }
 
-        public Camara()
+        public Camara(Controladores controladores)
         {
             _rutaFFmpeg = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Tools", "ffmpeg.exe");
+            _controladores = controladores;
         }
 
-        /// <summary>
-        /// Captura una foto de la pantalla completa del PC.
-        /// </summary>
         public bool CapturarFoto(string rutaDondeGuardar)
         {
             if (!File.Exists(_rutaFFmpeg))
@@ -40,7 +34,6 @@ namespace Proyecto_Camara
             ProcessStartInfo opciones = new ProcessStartInfo
             {
                 FileName = _rutaFFmpeg,
-                // gdigrab -i desktop toma la pantalla entera del PC
                 Arguments = $"-f gdigrab -i desktop -vframes 1 \"{rutaDondeGuardar}\" -y",
                 CreateNoWindow = true,
                 UseShellExecute = false
@@ -48,15 +41,12 @@ namespace Proyecto_Camara
 
             using (Process proceso = Process.Start(opciones))
             {
-                proceso.WaitForExit(5000); // Espera máxima de 5 segundos
+                proceso?.WaitForExit(5000);
             }
 
             return File.Exists(rutaDondeGuardar);
         }
 
-        /// <summary>
-        /// Inicia la grabación de la pantalla del PC.
-        /// </summary>
         public void IniciarGrabacion(string rutaVideoSalida)
         {
             if (EnGrabacion)
@@ -67,15 +57,15 @@ namespace Proyecto_Camara
             _rutaVideoFinal = rutaVideoSalida;
             _fragmentosTemporales.Clear();
 
+            _controladores.Detectar();
+            Debug.WriteLine($"Encoder usado: {_controladores.EncoderDeVideo}");
+
             IniciarNuevoFragmento();
 
             EnGrabacion = true;
             EnPausa = false;
         }
 
-        /// <summary>
-        /// Pausa la grabación cerrando el fragmento temporal activo.
-        /// </summary>
         public void PausarGrabacion()
         {
             if (EnGrabacion && !EnPausa)
@@ -85,9 +75,6 @@ namespace Proyecto_Camara
             }
         }
 
-        /// <summary>
-        /// Reanuda la grabación creando otro fragmento temporal de la pantalla.
-        /// </summary>
         public void ReanudarGrabacion()
         {
             if (EnGrabacion && EnPausa)
@@ -97,9 +84,6 @@ namespace Proyecto_Camara
             }
         }
 
-        /// <summary>
-        /// Detiene la grabación y une todos los fragmentos temporales en el archivo MP4 final.
-        /// </summary>
         public void DetenerGrabacion()
         {
             if (!EnGrabacion) return;
@@ -130,14 +114,35 @@ namespace Proyecto_Camara
             ProcessStartInfo opciones = new ProcessStartInfo
             {
                 FileName = _rutaFFmpeg,
-                // Grabación de pantalla mediante gdigrab
-                Arguments = $"-f gdigrab -framerate 30 -i desktop -c:v libx264 -pix_fmt yuv420p \"{rutaClip}\" -y",
+                // Solo muestra errores (menos trabajo y mensajes más claros)
+                Arguments = "-hide_banner -loglevel error -nostats " + _controladores.ConstruirArgumentosGrabacion(rutaClip),
                 CreateNoWindow = true,
                 UseShellExecute = false,
-                RedirectStandardInput = true
+                RedirectStandardInput = true,
+                RedirectStandardError = true,
+                StandardErrorEncoding = Encoding.UTF8
             };
 
+            _erroresFFmpeg.Clear();
             _procesoGrabacion = Process.Start(opciones);
+
+            try { _procesoGrabacion.PriorityClass = ProcessPriorityClass.AboveNormal; } catch { }
+
+            _procesoGrabacion.ErrorDataReceived += (s, ev) =>
+            {
+                if (ev.Data != null) _erroresFFmpeg.AppendLine(ev.Data);
+            };
+            _procesoGrabacion.BeginErrorReadLine();
+
+            // Si ffmpeg se cierra casi al instante, algo salió mal: mostramos el motivo
+            if (_procesoGrabacion.WaitForExit(700))
+            {
+                _procesoGrabacion.WaitForExit();   // termina de leer los mensajes
+                string detalle = _erroresFFmpeg.ToString();
+                _procesoGrabacion.Close();
+                _procesoGrabacion = null;
+                throw new Exception("ffmpeg se cerró al iniciar:\n" + detalle);
+            }
         }
 
         private void DetenerProcesoActual()
@@ -146,12 +151,18 @@ namespace Proyecto_Camara
             {
                 try
                 {
+                    // Se envía 'q' y se fueraza el vaciado del búfer (Flush)
                     _procesoGrabacion.StandardInput.WriteLine("q");
-                    _procesoGrabacion.WaitForExit(3000);
+                    _procesoGrabacion.StandardInput.Flush();
+
+                    // Se le dan 10 segundos a FFmpeg para escribir el encabezado MP4 correctamente
+                    if (!_procesoGrabacion.WaitForExit(10000))
+                    {
+                        _procesoGrabacion.Kill();
+                    }
                 }
                 catch
                 {
-                    // Si el proceso no responde a la orden 'q', lo cerramos
                     if (!_procesoGrabacion.HasExited)
                     {
                         _procesoGrabacion.Kill();
@@ -167,31 +178,57 @@ namespace Proyecto_Camara
 
         private void UnirFragmentos(List<string> fragmentos, string rutaSalidaFinal)
         {
+            // Un solo fragmento (sin pausas): no hace falta unir nada, solo mover el archivo
+            if (fragmentos.Count == 1 && File.Exists(fragmentos[0]))
+            {
+                File.Move(fragmentos[0], rutaSalidaFinal);
+                return;
+            }
+
             string rutaListaTxt = Path.Combine(Path.GetTempPath(), $"lista_{Guid.NewGuid()}.txt");
 
             using (StreamWriter writer = new StreamWriter(rutaListaTxt))
             {
                 foreach (string clip in fragmentos)
                 {
-                    writer.WriteLine($"file '{clip.Replace("\\", "/")}'");
+                    // Solo clips que existen y no están vacíos
+                    if (File.Exists(clip) && new FileInfo(clip).Length > 0)
+                    {
+                        writer.WriteLine($"file '{clip.Replace("\\", "/")}'");
+                    }
                 }
             }
 
             ProcessStartInfo opciones = new ProcessStartInfo
             {
                 FileName = _rutaFFmpeg,
-                Arguments = $"-f concat -safe 0 -i \"{rutaListaTxt}\" -c copy \"{rutaSalidaFinal}\" -y",
+                Arguments = $"-hide_banner -loglevel warning -f concat -safe 0 -fflags +genpts -i \"{rutaListaTxt}\" -c copy -avoid_negative_ts make_zero \"{rutaSalidaFinal}\" -y",
                 CreateNoWindow = true,
-                UseShellExecute = false
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                StandardErrorEncoding = Encoding.UTF8
             };
 
+            string mensajes;
+            int codigo;
             using (Process proceso = Process.Start(opciones))
             {
+                mensajes = proceso.StandardError.ReadToEnd();
                 proceso.WaitForExit();
+                codigo = proceso.ExitCode;
             }
 
-            // Limpieza de archivos temporales
+            Debug.WriteLine("Unir fragmentos: " + mensajes);
+
             if (File.Exists(rutaListaTxt)) File.Delete(rutaListaTxt);
+
+            // Si falló, NO borramos los clips para no perder la grabación
+            if (codigo != 0 || !File.Exists(rutaSalidaFinal))
+            {
+                throw new Exception("No se pudieron unir los fragmentos. Los clips quedaron en:\n"
+                    + Path.GetTempPath() + "\n\n" + mensajes);
+            }
+
             foreach (string clip in fragmentos)
             {
                 if (File.Exists(clip)) File.Delete(clip);
