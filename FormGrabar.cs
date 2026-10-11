@@ -23,7 +23,7 @@ namespace Proyecto_Camara
         private const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;    // Invisible en capturas (Windows 10/11)
 
         // Instancia del backend
-        private readonly Camara _camara;
+        private readonly GrabadorPantalla _grabarPantalla;
 
         // Referencia al formulario de inicio para poder volver a él
         private readonly FormInicio _inicio;
@@ -32,7 +32,7 @@ namespace Proyecto_Camara
         {
             InitializeComponent();
             _inicio = inicio;
-            _camara = new Camara(controladores);
+            _grabarPantalla = new GrabadorPantalla(controladores);
         }
 
         private readonly Stopwatch _cronometro = new Stopwatch();
@@ -127,7 +127,7 @@ namespace Proyecto_Camara
                 string rutaCompleta = Path.Combine(ObtenerRutaCarpetaVideos(), nombreFoto);
 
                 // Ya no usamos this.Hide(), Windows oculta la ventana automáticamente en la foto
-                bool exito = await Task.Run(() => _camara.CapturarFoto(rutaCompleta));
+                bool exito = await Task.Run(() => _grabarPantalla.CapturarFoto(rutaCompleta));
 
                 if (exito)
                 {
@@ -149,13 +149,13 @@ namespace Proyecto_Camara
 
             try
             {
-                if (!_camara.EnGrabacion)
+                if (!_grabarPantalla.EnGrabacion)
                 {
                     // --- INICIANDO GRABACIÓN ---
                     string nombreVideo = $"pantalla_{DateTime.Now:yyyyMMdd_HHmmss}.mp4";
                     string rutaCompleta = Path.Combine(ObtenerRutaCarpetaVideos(), nombreVideo);
 
-                    await Task.Run(() => _camara.IniciarGrabacion(rutaCompleta));
+                    await Task.Run(() => _grabarPantalla.IniciarGrabacion(rutaCompleta));
 
                     btnGrabarDetener.Text = "Detener Grabación";
                     btnGrabarDetener.BackColor = Color.Red;
@@ -173,7 +173,7 @@ namespace Proyecto_Camara
                 else
                 {
                     // --- DETENIENDO GRABACIÓN ---
-                    await Task.Run(() => _camara.DetenerGrabacion());
+                    await Task.Run(() => _grabarPantalla.DetenerGrabacion());
 
                     btnGrabarDetener.Text = "Iniciar Grabación";
                     btnGrabarDetener.BackColor = Color.Green;
@@ -208,10 +208,10 @@ namespace Proyecto_Camara
 
             try
             {
-                if (!_camara.EnPausa)
+                if (!_grabarPantalla.EnPausa)
                 {
                     // --- PAUSANDO ---
-                    await Task.Run(() => _camara.PausarGrabacion());
+                    await Task.Run(() => _grabarPantalla.PausarGrabacion());
 
                     btnPausarReanudar.Text = "Reanudar";
                     btnPausarReanudar.BackColor = Color.Yellow;
@@ -224,7 +224,7 @@ namespace Proyecto_Camara
                 else
                 {
                     // --- REANUDANDO ---
-                    await Task.Run(() => _camara.ReanudarGrabacion());
+                    await Task.Run(() => _grabarPantalla.ReanudarGrabacion());
 
                     btnPausarReanudar.Text = "Pausar";
                     btnPausarReanudar.BackColor = Color.Orange;

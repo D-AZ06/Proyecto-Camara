@@ -177,47 +177,6 @@ namespace Proyecto_Camara
         /// Arma la parte de VIDEO de la línea de ffmpeg para el modo indicado.
         /// 'entrada' devuelve las opciones de entrada (solo hacen falta con gdigrab).
         /// </summary>
-        private string PartesVideo(ModoCaptura modo, bool usarQsv, bool conAudio, out string entrada)
-        {
-            int ancho, crf, gq;
-            ParametrosCalidad(out ancho, out crf, out gq);
-
-            string pix = usarQsv ? "nv12" : "yuv420p";
-
-            // Se añade -profile:v main y async_depth para mayor estabilidad en la UHD 600
-            // Se añade -g {Fps * 2} para fijar keyframes y -look_ahead 0 para no ahogar la VRAM
-            string codec = usarQsv
-                ? $"-c:v h264_qsv -preset veryfast -profile:v main -bf 0 -g {Fps * 2} -look_ahead 0 -global_quality {gq} -async_depth 1"
-                : $"-c:v libx264 -preset ultrafast -tune zerolatency -crf {crf} -threads 2";
-
-            string escalaCpu = ancho > 0
-                ? $"scale={ancho}:-2:flags=fast_bilinear"
-                : "scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=fast_bilinear";
-
-            // FIX CLAVE: vpp_qsv no soporta bien h=-1. 
-            // Usamos una fórmula que calcula el alto proporcional exacto y lo fuerza a ser número par.
-            string escalaGpu = ancho > 0 ? $"w={ancho}:h='trunc({ancho}*ih/iw/2)*2':" : "";
-
-            string dxgi = $"ddagrab=output_idx=0:framerate={Fps}:draw_mouse=1";
-            string mapAudio = conAudio ? " -map 0:a" : "";
-
-            switch (modo)
-            {
-                case ModoCaptura.DxgiGpu:
-                    // Inicializar el dispositivo globalmente ayuda a que ddagrab y qsv compartan memoria sin errores
-                    entrada = "-init_hw_device qsv=hw -filter_hw_device hw";
-                    return $"-filter_complex \"{dxgi},hwmap=derive_device=qsv,format=qsv,vpp_qsv={escalaGpu}format=nv12[v]\" -map \"[v]\"{mapAudio} {codec}";
-
-                case ModoCaptura.DxgiCpu:
-                    entrada = "";
-                    return $"-filter_complex \"{dxgi},hwdownload,format=bgra,{escalaCpu},format={pix}[v]\" -map \"[v]\"{mapAudio} {codec}";
-
-                default: // Gdi
-                    entrada = $"-rtbufsize 100M -f gdigrab -framerate {Fps} -draw_mouse 1 -i desktop";
-                    return $"-vf \"{escalaCpu},format={pix}\" {codec}";
-            }
-        }
-
         public string ConstruirArgumentosGrabacion(string rutaSalida)
         {
             bool usarQsv = EncoderDeVideo == "h264_qsv";
@@ -226,7 +185,7 @@ namespace Proyecto_Camara
             string entradaVideo;
             string video = PartesVideo(ElegirModo(), usarQsv, conAudio, out entradaVideo);
 
-            // AUMENTO DE BUFFER: thread_queue_size pasa a 2048
+            // Búfer de audio amplio para evitar micro-cortes
             string entradaAudio = conAudio
                 ? $"-thread_queue_size 2048 -rtbufsize 100M -f dshow -i audio=\"{Microfono}\""
                 : "";
@@ -236,8 +195,50 @@ namespace Proyecto_Camara
                 ? $"-af \"volume={ganancia},alimiter=limit=0.9\" -c:a aac -b:a 64k -ar 44100"
                 : "-an";
 
-            // RITMO CONSTANTE: Añadimos -fps_mode crf antes de la ruta de salida
+            // TASA VARIABLE (-fps_mode vfr): Ajusta la línea de tiempo si hay picos de uso en la CPU
             return $"{entradaVideo} {entradaAudio} {video} {audio} -fps_mode vfr \"{rutaSalida}\" -y";
+        }
+
+        private string PartesVideo(ModoCaptura modo, bool usarQsv, bool conAudio, out string entrada)
+        {
+            int ancho, crf, gq;
+            ParametrosCalidad(out ancho, out crf, out gq);
+
+            string pix = usarQsv ? "nv12" : "yuv420p";
+
+            // Códec de video: QuickSync optimizado para Intel UHD 600 o x264 para CPU
+            string codec = usarQsv
+                ? $"-c:v h264_qsv -preset veryfast -profile:v main -bf 0 -g {Fps * 2} -look_ahead 0 -global_quality {gq} -async_depth 1"
+                : $"-c:v libx264 -preset ultrafast -tune zerolatency -crf {crf} -threads 2";
+
+            // Escalado CPU: Solo si ancho > 0 (Calidad Media/Baja)
+            string escalaCpu = ancho > 0
+                ? $"scale={ancho}:-2:flags=fast_bilinear"
+                : "scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=fast_bilinear";
+
+            // Escalado GPU (vpp_qsv): Solo si ancho > 0. En Calidad Alta (ancho = 0) graba en resolución nativa
+            string filtroGpu = ancho > 0
+                ? $",vpp_qsv=w={ancho}:h='trunc({ancho}*ih/iw/2)*2':format=nv12"
+                : ",vpp_qsv=format=nv12";
+
+            string dxgi = $"ddagrab=output_idx=0:framerate={Fps}:draw_mouse=1";
+            string mapAudio = conAudio ? " -map 0:a" : "";
+
+            switch (modo)
+            {
+                case ModoCaptura.DxgiGpu:
+                    // Vinculación correcta de Direct3D11 (ddagrab) con QSV
+                    entrada = "-init_hw_device d3d11va=d3d11 -init_hw_device qsv=qsv@d3d11 -filter_hw_device qsv";
+                    return $"-filter_complex \"{dxgi},hwmap=derive_device=qsv,format=qsv{filtroGpu}[v]\" -map \"[v]\"{mapAudio} {codec}";
+
+                case ModoCaptura.DxgiCpu:
+                    entrada = "";
+                    return $"-filter_complex \"{dxgi},hwdownload,format=bgra,{escalaCpu},format={pix}[v]\" -map \"[v]\"{mapAudio} {codec}";
+
+                default: // Gdi
+                    entrada = $"-rtbufsize 100M -f gdigrab -framerate {Fps} -draw_mouse 1 -i desktop";
+                    return $"-vf \"{escalaCpu},format={pix}\" {codec}";
+            }
         }
 
         // ==========================================

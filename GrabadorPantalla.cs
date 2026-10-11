@@ -6,7 +6,7 @@ using System.Text;
 
 namespace Proyecto_Camara
 {
-    internal class Camara
+    internal class GrabadorPantalla
     {
         private readonly string _rutaFFmpeg;
         private Process _procesoGrabacion;
@@ -18,7 +18,7 @@ namespace Proyecto_Camara
         public bool EnGrabacion { get; private set; }
         public bool EnPausa { get; private set; }
 
-        public Camara(Controladores controladores)
+        public GrabadorPantalla(Controladores controladores)
         {
             _rutaFFmpeg = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Tools", "ffmpeg.exe");
             _controladores = controladores;

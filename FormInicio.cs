@@ -75,5 +75,16 @@ namespace Proyecto_Camara
             grabar.Show();
             this.Hide();
         }
+
+        private void btnConfig_Click(object sender, EventArgs e)
+        {
+            using (FormConfig formConfig = new FormConfig())
+            {
+                if (formConfig.ShowDialog() == DialogResult.OK)
+                {
+                    
+                }
+            }
+        }
     }
 }
